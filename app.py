@@ -2519,6 +2519,49 @@ TRACKED_REPO_PATHS = [
     "LICENSE", "extension", "deploy", "tools",
 ]
 _UPDATE_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_MANAGED_UPDATE_LOCK = threading.Lock()
+
+
+def _managed_updates() -> bool:
+    return os.environ.get("MUSE2API_UPDATE_MODE") == "github-actions"
+
+
+def _managed_update_paths():
+    directory = os.path.join(CFG.base_dir, "updates")
+    return directory, os.path.join(directory, "request.json"), os.path.join(directory, "status.json")
+
+
+def _managed_update_status() -> dict:
+    _, _, path = _managed_update_paths()
+    try:
+        with open(path, encoding="utf-8") as source:
+            value = json.load(source)
+        return value if isinstance(value, dict) else {"state": "idle"}
+    except (OSError, ValueError):
+        return {"state": "idle"}
+
+
+def _queue_managed_update() -> dict:
+    directory, request_path, status_path = _managed_update_paths()
+    with _MANAGED_UPDATE_LOCK:
+        current = _managed_update_status()
+        if os.path.exists(request_path) or (current.get("state") in ("queued", "syncing", "building")
+                and time.time() - current.get("updated_at", 0) < 1800):
+            raise HTTPException(409, "已有在线更新正在进行，请等待完成")
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        request_id = uuid.uuid4().hex
+        status = {"request_id": request_id, "state": "queued", "updated_at": time.time(),
+                  "message": "更新已排队，正在检查上游版本"}
+        for path, value in ((status_path, status), (request_path, {"request_id": request_id})):
+            with open(path + ".tmp", "w", encoding="utf-8") as output:
+                json.dump(value, output)
+            os.replace(path + ".tmp", path)
+        return {"ok": True, "managed": True, **status}
+
+
+@app.get("/admin/update/status")
+def managed_update_status(_=Depends(auth)):
+    return {"managed": _managed_updates(), **_managed_update_status()}
 
 
 def _read_env_key(key: str) -> str:
@@ -2616,6 +2659,12 @@ def _check_update_sync(force: bool = False) -> dict:
         except OSError:
             pass
 
+    # Deployment commits belong to the fork; compare only the upstream revision
+    # actually merged into the image to avoid treating our own patches as updates.
+    managed = _managed_updates()
+    if managed:
+        local_sha = os.environ.get("MUSE2API_UPSTREAM_SHA", "")[:7]
+
     remote_version = local_version
     highlights = list(local_ver_obj.get("highlights") or [])
     highlights_en = list(local_ver_obj.get("highlights_en") or [])
@@ -2668,7 +2717,7 @@ def _check_update_sync(force: bool = False) -> dict:
         pass
 
     # 若用户通过 Docker/ZIP 部署（无 .git）且首次运行版本一致，记录初始基准 SHA
-    if not local_sha and remote_sha and local_version == remote_version:
+    if not managed and not local_sha and remote_sha and local_version == remote_version:
         local_sha = remote_sha
         try:
             with open(_installed_sha_file(), "w", encoding="utf-8") as f:
@@ -2700,7 +2749,11 @@ def _check_update_sync(force: bool = False) -> dict:
         "remote_msg": remote_msg,
         "remote_time": remote_time,
         "has_update": has_update,
-        "up_to_date": not has_update and bool(remote_sha or remote_version),
+        "up_to_date": not has_update and bool(remote_sha and local_sha) if managed else not has_update and bool(remote_sha or remote_version),
+        "managed": managed,
+        "deployment_sha": os.environ.get("MUSE2API_REVISION", "") if managed else "",
+        "automatic_updates": "hourly" if managed else "",
+        "workflow_url": "https://github.com/ccfwwm/muse2api/actions" if managed else "",
         "highlights": highlights,
         "highlights_en": highlights_en,
         "recent_commits": recent_commits,
@@ -2785,6 +2838,8 @@ async def admin_check_update(force: bool = False):
 @app.post("/admin/repo/pull")
 async def admin_upgrade_now(payload: dict = Body(default={}), _=Depends(auth)):
     """一键从 GitHub 官方仓库拉取最新更新并自动平滑重启服务。"""
+    if _managed_updates():
+        return _queue_managed_update()
     res = await asyncio.to_thread(_upgrade_from_github_sync)
     restart = payload.get("restart", True) if isinstance(payload, dict) else True
     if restart:

@@ -19,6 +19,7 @@ services:
       MUSE2API_HOME: /state
       MUSE2API_HOME_DIR: /state
       MUSE2API_PROFILE_ROOT: /state/profiles
+      MUSE2API_UPDATE_MODE: github-actions
       HOME: /state
       PYTHONDONTWRITEBYTECODE: '1'
     volumes:

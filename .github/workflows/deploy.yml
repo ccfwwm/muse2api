@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
 
 concurrency:
   group: muse2api-production
@@ -13,7 +15,54 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      revision: ${{ steps.sync.outputs.revision }}
+      upstream: ${{ steps.sync.outputs.upstream }}
+      deploy: ${{ steps.sync.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge upstream while preserving deployment changes
+        id: sync
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          git config user.name 'muse2api-updater'
+          git config user.email 'muse2api-updater@users.noreply.github.com'
+          git remote add upstream https://github.com/czg86389-hub/muse2api.git
+          git fetch upstream main
+          before=$(git rev-parse HEAD)
+          git merge --no-edit upstream/main
+          revision=$(git rev-parse HEAD)
+          upstream=$(git rev-parse upstream/main)
+          if [ "$revision" != "$before" ]; then
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+              git push origin HEAD:main
+          fi
+          deploy=true
+          if [ "$EVENT_NAME" = schedule ]; then
+            deployed=$(curl --fail --silent --max-time 15 https://muse.aicodeme.xyz/admin/update/check | jq -r '.deployment_sha // empty' || true)
+            if [ "$deployed" = "$revision" ]; then deploy=false; fi
+          fi
+          printf 'revision=%s\nupstream=%s\ndeploy=%s\n' "$revision" "$upstream" "$deploy" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
+    if: needs.prepare.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -24,6 +73,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ needs.prepare.outputs.revision }}
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
@@ -36,7 +86,10 @@ jobs:
           python tests/test_admin_base_url.py
           python tests/test_cookie_requirements.py
           python tests/test_extension_zip.py
+          python tests/test_managed_updates.py
+          python tests/test_update_controller.py
           node tests/test_admin_api_error_messages.mjs
+          node tests/test_managed_update_ui.mjs
           bash -n deploy/deploy.sh
           MUSE2API_IMAGE=ghcr.io/ccfwwm/muse2api:validation docker compose -f deploy/compose.production.yml config --quiet
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -52,15 +105,19 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/ccfwwm/muse2api:sha-${{ github.sha }}
+          tags: ghcr.io/ccfwwm/muse2api:sha-${{ needs.prepare.outputs.revision }}
+          build-args: |
+            MUSE2API_REVISION=${{ needs.prepare.outputs.revision }}
+            MUSE2API_UPSTREAM_SHA=${{ needs.prepare.outputs.upstream }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.revision }}
+            io.muse2api.upstream-revision=${{ needs.prepare.outputs.upstream }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy:
-    needs: build
+    needs: [prepare, build]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -79,7 +136,7 @@ jobs:
           DEPLOY_PORT: ${{ vars.MUSE_DEPLOY_PORT }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
-          REVISION: ${{ github.sha }}
+          REVISION: ${{ needs.prepare.outputs.revision }}
           REGISTRY_USER: ${{ github.actor }}
         shell: bash
         run: |

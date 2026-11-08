@@ -32,6 +32,11 @@ COPY deploy/ ./deploy/
 COPY extension/ ./extension/
 COPY tools/ ./tools/
 
+ARG MUSE2API_REVISION=""
+ARG MUSE2API_UPSTREAM_SHA=""
+ENV MUSE2API_REVISION=${MUSE2API_REVISION} \
+    MUSE2API_UPSTREAM_SHA=${MUSE2API_UPSTREAM_SHA}
+
 # 创建持久化数据目录
 RUN mkdir -p /app/data/media /app/data/downloads /root/muse2api-profiles
 

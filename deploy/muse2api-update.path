@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for authenticated Muse2api online update requests
+
+[Path]
+PathExists=/opt/muse2api/state/updates/request.json
+Unit=muse2api-update.service
+
+[Install]
+WantedBy=multi-user.target

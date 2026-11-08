@@ -55,13 +55,14 @@ from config import CFG
 assert CFG.api_key and CFG.api_key.startswith("m2a_"), "Management key is missing"
 base = "http://127.0.0.1:18610"
 headers = {"Authorization": "Bearer " + CFG.api_key}
-for path in ("/admin/status", "/v1/models"):
-    with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=10) as response:
-        result = json.load(response)
-        if path == "/admin/status":
-            assert result["base_url"] == "https://muse.aicodeme.xyz/v1"
-        else:
-            assert result["data"], "Model list is empty"
+for origin in (base, "https://muse.aicodeme.xyz"):
+    for path in ("/admin/status", "/v1/models"):
+        with urllib.request.urlopen(urllib.request.Request(origin + path, headers=headers), timeout=15) as response:
+            result = json.load(response)
+            if path == "/admin/status":
+                assert result["base_url"] == "https://muse.aicodeme.xyz/v1"
+            else:
+                assert result["data"], "Model list is empty"
 try:
     urllib.request.urlopen(base + "/admin/status", timeout=10)
 except urllib.error.HTTPError as error:

@@ -7,6 +7,11 @@ Repository: https://github.com/ccfwwm/muse2api
 Pushes to `main` run application checks, build an amd64 Docker image on GitHub,
 publish it to GHCR, and deploy its immutable digest to `rakserver`. The workflow
 can also be run manually from the Actions page. Other branches cannot deploy.
+Before building, the workflow merges upstream `main` into the fork. Merge
+conflicts stop deployment without overwriting local changes. An hourly schedule
+checks upstream and retries outstanding deployments; unchanged healthy deployments
+are skipped. The fork revision and the upstream revision are embedded separately
+in the image, so local deployment commits never create a false upstream alert.
 
 The SSH key is dedicated to this application. Its authorized-key entry uses
 `restrict,command="/opt/muse2api/deploy/ssh-dispatch.py"`; it cannot open a shell,
@@ -70,6 +75,28 @@ cd /opt/muse2api
 docker compose --env-file .release.env -f deploy/compose.production.yml up -d --wait
 ```
 
-Use the GitHub workflow for upgrades. In-container source upgrades are blocked
-at the reverse proxy because they would bypass the deployed image and are lost
-on container replacement.
+## Online update button
+
+With `MUSE2API_UPDATE_MODE=github-actions`, the authenticated update button writes
+a request to `/state/updates/request.json`. The host's `muse2api-update.path`
+starts `muse2api-update.service`, whose controller runs outside the container.
+It merges upstream in a disposable checkout and pushes a commit using a dedicated
+repository-scoped deploy key. GitHub then builds and deploys normally. A manual
+update also permits retrying/rebuilding the current upstream revision.
+
+The controller watches verified deployment metadata and GitHub run failures;
+`/admin/update/status` reports queued, syncing, building, completed, or failed.
+The UI waits for confirmed success before reloading and resumes polling after
+refresh. Duplicate requests return 409. Conflicts/build failures stay visible.
+The container receives neither the write key nor access to Docker or systemd.
+
+Host setup additionally installs `update-controller.py` with the other root-owned
+control files, installs `muse2api-update.path` and `.service` in `/etc/systemd/system`,
+and enables the path unit. `/opt/muse2api/updater/github_ed25519` is registered as
+a write-enabled deploy key on this repository only, and `updater/known_hosts`
+contains GitHub's SSH host keys verified through its HTTPS API. The systemd unit
+may write only its checkout and update queue; it cannot edit deployed configuration.
+
+Native in-container source replacement is bypassed in managed mode. Repository
+pushes from the old maintainer UI remain blocked at Nginx; the online upgrade
+routes now pass through to the authenticated queue API.
