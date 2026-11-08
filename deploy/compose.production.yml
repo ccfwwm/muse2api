@@ -11,6 +11,10 @@ services:
       - no-new-privileges:true
     ports:
       - '127.0.0.1:18610:18610'
+    networks:
+      sub2api:
+        aliases:
+          - muse2api
     environment:
       MUSE2API_HOME: /state
       MUSE2API_HOME_DIR: /state
@@ -38,3 +42,8 @@ services:
       options:
         max-size: 10m
         max-file: '3'
+
+networks:
+  sub2api:
+    external: true
+    name: sub2api-deploy_sub2api-network

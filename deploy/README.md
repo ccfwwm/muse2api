@@ -37,6 +37,12 @@ updates this persistent file and survives container replacement. Account cookies
 task records and media are in `state/data`; Chromium profiles are in
 `state/profiles`. None of this state is committed to GitHub or baked into images.
 The service binds only `127.0.0.1:18610`; Nginx provides HTTPS and unbuffered SSE.
+The `muse2api` container also joins the existing external network
+`sub2api-deploy_sub2api-network`. Sub2api can use
+`http://muse2api:18610/v1` as the upstream API base URL; Muse2api can reach
+`http://sub2api:8080`. No database container is created: JSON storage remains
+isolated in this application's state directory. The Compose project and container
+are both named `muse2api`, distinct from the existing Sub2api resources.
 Let's Encrypt renews through the server's existing certbot timer and reload hook.
 
 The application signs in with an `m2a_` management key and has no username.

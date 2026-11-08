@@ -13,6 +13,7 @@ registry_user=${3:?registry user required}
 cd /opt/muse2api
 exec 9>.deploy.lock
 flock -w 900 9
+docker network inspect sub2api-deploy_sub2api-network >/dev/null
 IFS= read -r registry_token
 [[ -n "$registry_token" ]]
 task_docker_config=$(mktemp -d)
@@ -46,6 +47,7 @@ verify_release() {
     docker compose --env-file .release.env -f deploy/compose.production.yml up -d --wait --wait-timeout 150 || return 1
     docker exec -i muse2api python - <<'PY' || return 1
 import json
+import socket
 import urllib.error
 import urllib.request
 from config import CFG
@@ -66,7 +68,10 @@ except urllib.error.HTTPError as error:
     assert error.code == 401
 else:
     raise AssertionError("Unauthenticated management request was accepted")
+with socket.create_connection(("sub2api", 8080), timeout=10):
+    pass
 print("Authenticated management and model endpoints passed; anonymous access denied")
+print("Shared Docker network can resolve and connect to sub2api:8080")
 PY
 }
 
