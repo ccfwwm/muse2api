@@ -87,8 +87,8 @@ jobs:
           umask 077
           task_ssh_dir=$(mktemp -d)
           trap 'rm -rf "$task_ssh_dir"' EXIT
-          printf '%s\n' "$DEPLOY_KEY" > "$task_ssh_dir/key"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$task_ssh_dir/known_hosts"
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > "$task_ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | tr -d '\r' > "$task_ssh_dir/known_hosts"
           printf '%s\n' "$REGISTRY_TOKEN" | ssh -T \
             -i "$task_ssh_dir/key" -p "$DEPLOY_PORT" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
