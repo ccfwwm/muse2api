@@ -1,0 +1,40 @@
+name: muse2api
+
+services:
+  muse2api:
+    image: ${MUSE2API_IMAGE:?An immutable image reference is required}
+    container_name: muse2api
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - '127.0.0.1:18610:18610'
+    environment:
+      MUSE2API_HOME: /state
+      MUSE2API_HOME_DIR: /state
+      MUSE2API_PROFILE_ROOT: /state/profiles
+      HOME: /state
+      PYTHONDONTWRITEBYTECODE: '1'
+    volumes:
+      - /opt/muse2api/state:/state
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+      - /run:size=16m,mode=755
+    shm_size: 2gb
+    mem_limit: 4g
+    cpus: 2
+    pids_limit: 512
+    stop_grace_period: 45s
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18610/healthz', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

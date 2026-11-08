@@ -1,0 +1,16 @@
+.git
+.github
+.env*
+data
+state
+backups
+**/__pycache__
+*.pyc
+*.log
+*.key
+*.pem
+venv
+.venv
+chrome-profile
+muse2api-profiles
+tests
